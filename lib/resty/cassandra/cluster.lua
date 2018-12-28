@@ -2,23 +2,23 @@
 -- Cluster module for OpenResty.
 -- @module resty.cassandra.cluster
 -- @author thibaultcha
--- @release 1.1.0
+-- @release 1.3.3
 
 local resty_lock = require 'resty.lock'
 local cassandra = require 'cassandra'
 local cql = require 'cassandra.cql'
-local ffi = require 'ffi'
 
+local update_time = ngx.update_time
 local cql_errors = cql.errors
-local ffi_cast = ffi.cast
-local ffi_str = ffi.string
 local requests = cql.requests
 local tonumber = tonumber
 local concat = table.concat
 local shared = ngx.shared
 local assert = assert
 local pairs = pairs
+local fmt = string.format
 local sub = string.sub
+local find = string.find
 local now = ngx.now
 local type = type
 local log = ngx.log
@@ -26,29 +26,12 @@ local ERR = ngx.ERR
 local WARN = ngx.WARN
 local DEBUG = ngx.DEBUG
 local NOTICE = ngx.NOTICE
-local C = ffi.C
 
 local empty_t = {}
 local _log_prefix = '[lua-cassandra] '
 local _rec_key = 'host:rec:'
 local _prepared_key = 'prepared:id:'
 local _protocol_version_key = 'protocol:version:'
-local _bind_all_address = '0.0.0.0'
-
-ffi.cdef [[
-    size_t strlen(const char *str);
-
-    struct peer_rec {
-        uint64_t      reconn_delay;
-        uint64_t      unhealthy_at;
-        char         *data_center;
-        char         *release_version;
-    };
-]]
-local str_const = ffi.typeof('char *')
-local rec_peer_const = ffi.typeof('const struct peer_rec*')
-local rec_peer_size = ffi.sizeof('struct peer_rec')
-local rec_peer_cdata = ffi.new('struct peer_rec')
 
 local function get_now()
   return now() * 1000
@@ -70,12 +53,10 @@ local function set_peer(self, host, up, reconn_delay, unhealthy_at,
   end
 
   -- host info
-  rec_peer_cdata.reconn_delay = reconn_delay
-  rec_peer_cdata.unhealthy_at = unhealthy_at
-  rec_peer_cdata.data_center = ffi_cast(str_const, data_center)
-  rec_peer_cdata.release_version = ffi_cast(str_const, release_version)
+  local marshalled = fmt("%d:%d:%d:%s%s", reconn_delay, unhealthy_at,
+                         #data_center, data_center, release_version)
 
-  ok, err = self.shm:safe_set(_rec_key..host, ffi_str(rec_peer_cdata, rec_peer_size))
+  ok, err = self.shm:safe_set(_rec_key..host, marshalled)
   if not ok then
     return nil, 'could not set host details in shm: '..err
   end
@@ -83,13 +64,17 @@ local function set_peer(self, host, up, reconn_delay, unhealthy_at,
   return true
 end
 
+local function add_peer(self, host, data_center)
+  return set_peer(self, host, true, 0, 0, data_center, "")
+end
+
 local function get_peer(self, host, status)
-  local rec_v, err = self.shm:get(_rec_key .. host)
+  local marshalled, err = self.shm:get(_rec_key .. host)
   if err then
     return nil, 'could not get host details in shm: '..err
-  elseif not rec_v then
+  elseif marshalled == nil then
     return nil, 'no host details for '..host
-  elseif type(rec_v) ~= 'string' or #rec_v ~= rec_peer_size then
+  elseif type(marshalled) ~= 'string' then
     return nil, 'corrupted shm'
   end
 
@@ -98,17 +83,26 @@ local function get_peer(self, host, status)
     if err then return nil, 'could not get host status in shm: '..err end
   end
 
-  local peer = ffi_cast(rec_peer_const, rec_v)
-  local data_center = ffi_str(peer.data_center, C.strlen(peer.data_center))
-  local release_version = ffi_str(peer.release_version, C.strlen(peer.release_version))
+  local sep_1 = find(marshalled, ":", 1, true)
+  local sep_2 = find(marshalled, ":", sep_1 + 1, true)
+  local sep_3 = find(marshalled, ":", sep_2 + 1, true)
+
+  local reconn_delay    = sub(marshalled, 1, sep_1 - 1)
+  local unhealthy_at    = sub(marshalled, sep_1 + 1, sep_2 - 1)
+  local data_center_len = sub(marshalled, sep_2 + 1, sep_3 - 1)
+
+  local data_center_last = sep_3 + tonumber(data_center_len)
+
+  local data_center     = sub(marshalled, sep_3 + 1, data_center_last)
+  local release_version = sub(marshalled, data_center_last + 1)
 
   return {
     up = status,
     host = host,
     data_center = data_center ~= '' and data_center or nil,
     release_version = release_version ~= '' and release_version or nil,
-    reconn_delay = tonumber(peer.reconn_delay),
-    unhealthy_at = tonumber(peer.unhealthy_at)
+    reconn_delay = tonumber(reconn_delay),
+    unhealthy_at = tonumber(unhealthy_at)
   }
 end
 
@@ -129,6 +123,11 @@ local function get_peers(self)
   if #peers > 0 then
     return peers
   end
+end
+
+local function delete_peer(self, host)
+  self.shm:delete(_rec_key .. host) -- details
+  self.shm:delete(host) -- status bool
 end
 
 local function set_peer_down(self, host)
@@ -221,7 +220,7 @@ end
 -----------
 
 local _Cluster = {
-  _VERSION = '1.1.0',
+  _VERSION = '1.3.3',
 }
 
 _Cluster.__index = _Cluster
@@ -235,9 +234,9 @@ _Cluster.__index = _Cluster
 -- @field default_port The port on which all nodes from the cluster are
 -- listening on. (`number`, default: `9042`)
 -- @field keyspace Keyspace to use for this cluster. (`string`, optional)
--- @field connect_timeout The timeout value when connecing to a node, in ms.
+-- @field timeout_connect The timeout value when connecing to a node, in ms.
 -- (`number`, default: `1000`)
--- @field read_timeout The timeout value when reading from a node, in ms.
+-- @field timeout_read The timeout value when reading from a node, in ms.
 -- (`number`, default: `2000`)
 -- @field retry_on_timeout Specifies if the request should be retried on the
 -- next coordinator (as per the load balancing policy)
@@ -283,7 +282,7 @@ _Cluster.__index = _Cluster
 --   contact_points = {"10.0.0.1", "10.0.0.2"},
 --   keyspace = "my_keyspace",
 --   default_port = 9042,
---   connect_timeout = 3000
+--   timeout_connect = 3000
 -- }
 --
 -- @param[type=table] opts Options for the created cluster client.
@@ -320,6 +319,11 @@ function _Cluster.new(opts)
         return nil, 'verify must be a boolean'
       end
       peers_opts.verify = v
+    elseif k == 'cafile' then
+      if type(v) ~= 'string' then
+        return nil, 'cafile must be a string'
+      end
+      peers_opts.cafile = v
     elseif k == 'auth' then
       if type(v) ~= 'table' then
         return nil, 'auth seems not to be an auth provider'
@@ -404,7 +408,7 @@ local function first_coordinator(self)
     if not peer then
       errors[cp[i]] = err
     else
-      return peer
+      return peer, nil, cp[i]
     end
   end
 
@@ -470,7 +474,7 @@ function _Cluster:refresh()
   if err then return nil, err
   elseif not peers then
     -- we are the first ones to get there
-    local coordinator, err = first_coordinator(self)
+    local coordinator, err, local_cp = first_coordinator(self)
     if not coordinator then return nil, err end
 
     local local_rows, err = coordinator:execute [[
@@ -487,8 +491,18 @@ function _Cluster:refresh()
 
     coordinator:setkeepalive()
 
+    local local_addr = local_rows[1].rpc_address
+    if local_addr == "0.0.0.0" or local_addr == "::" then
+      log(WARN, _log_prefix, 'found contact point with \'', local_addr, '\' ',
+                             'as rpc_address, using \'', local_cp, '\' to ',
+                             'contact it instead. If this is incorrect ',
+                             'you should avoid using \'', local_addr, '\' ',
+                             'in rpc_address')
+      local_addr = local_cp
+    end
+
     rows[#rows+1] = { -- local host
-      rpc_address = coordinator.host,
+      rpc_address = local_addr,
       data_center = local_rows[1].data_center,
       release_version = local_rows[1].release_version
     }
@@ -501,12 +515,12 @@ function _Cluster:refresh()
                               ' in ', coordinator.host, '\'s peers system ',
                               'table. ', row.peer, ' will be ignored.')
       else
-        if host == _bind_all_address then
-          log(WARN, _log_prefix, 'found host with 0.0.0.0 as rpc_address, ',
-                                 'using listen_address ', row.peer, ' to ',
-                                 'contact it instead. If this is ',
-                                 'incorrect you should avoid using 0.0.0.0 ',
-                                 'server-side.')
+        if host == "0.0.0.0" or host == "::" then
+          log(WARN, _log_prefix, 'found host with \'', host, '\' as ',
+                                 'rpc_address, using \'', row.peer, '\' ',
+                                 'to contact it instead. If this is ',
+                                 'incorrect you should avoid using \'', host,
+                                 '\' in rpc_address')
           host = row.peer
         end
 
@@ -573,20 +587,28 @@ local function check_schema_consensus(coordinator)
   return local_res[1].schema_version
 end
 
-local function wait_schema_consensus(self, coordinator)
+local function wait_schema_consensus(self, coordinator, timeout)
+  timeout = timeout or self.max_schema_consensus_wait
   local peers, err = get_peers(self)
   if err then return nil, err
   elseif not peers then return nil, 'no peers in shm'
   elseif #peers < 2 then return true end
 
+  update_time()
+
   local ok, err, tdiff
   local tstart = get_now()
 
   repeat
+    -- disabled because this method is currently used outside of an
+    -- ngx_lua compatible context by production applications.
+    -- no fallback implemented yet.
     --ngx.sleep(0.5)
+
+    update_time()
     ok, err = check_schema_consensus(coordinator)
     tdiff = get_now() - tstart
-  until ok or err or tdiff >= self.max_schema_consensus_wait
+  until ok or err or tdiff >= timeout
 
   if ok then
     return ok
@@ -926,12 +948,17 @@ end
 
 _Cluster.set_peer = set_peer
 _Cluster.get_peer = get_peer
+_Cluster.add_peer = add_peer
 _Cluster.get_peers = get_peers
+_Cluster.delete_peer = delete_peer
 _Cluster.set_peer_up = set_peer_up
 _Cluster.can_try_peer = can_try_peer
 _Cluster.handle_error = handle_error
 _Cluster.set_peer_down = set_peer_down
 _Cluster.get_or_prepare = get_or_prepare
 _Cluster.next_coordinator = next_coordinator
+_Cluster.first_coordinator = first_coordinator
+_Cluster.wait_schema_consensus = wait_schema_consensus
+_Cluster.check_schema_consensus = check_schema_consensus
 
 return _Cluster

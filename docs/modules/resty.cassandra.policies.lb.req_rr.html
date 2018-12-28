@@ -42,8 +42,8 @@
   <li><a href="../modules/resty.cassandra.cluster.html">resty.cassandra.cluster</a></li>
   <li><a href="../modules/resty.cassandra.policies.lb.dc_rr.html">resty.cassandra.policies.lb.dc_rr</a></li>
   <li><a href="../modules/resty.cassandra.policies.lb.req_dc_rr.html">resty.cassandra.policies.lb.req_dc_rr</a></li>
-  <li><a href="../modules/resty.cassandra.policies.lb.req_rr.html">resty.cassandra.policies.lb.req_rr</a></li>
-  <li><strong>resty.cassandra.policies.lb.rr</strong></li>
+  <li><strong>resty.cassandra.policies.lb.req_rr</strong></li>
+  <li><a href="../modules/resty.cassandra.policies.lb.rr.html">resty.cassandra.policies.lb.rr</a></li>
   <li><a href="../modules/resty.cassandra.policies.reconnection.const.html">resty.cassandra.policies.reconnection.const</a></li>
   <li><a href="../modules/resty.cassandra.policies.reconnection.exp.html">resty.cassandra.policies.reconnection.exp</a></li>
   <li><a href="../modules/resty.cassandra.policies.retry.simple.html">resty.cassandra.policies.retry.simple</a></li>
@@ -65,11 +65,17 @@
 
 <div id="content">
 
-<h1>Module <code>resty.cassandra.policies.lb.rr</code></h1>
-<p>Round robin load balancing policy.</p>
-<p>
+<h1>Module <code>resty.cassandra.policies.lb.req_rr</code></h1>
+<p>Request-aware round robin load balancing policy for OpenResty.</p>
+<p> This policy will try to reuse the same node for the lifecycle of a given
+ request if possible. It is mostly designed for use in OpenResty
+ environments.</p>
 
-</p>
+<p> This ensures that the underlying connection pool to the node is reused as
+ much as possible. If a new node is chosen for every query, there is no
+ guarantee that each selected node will already have a pre-established
+ connection. Since this policy reuses the same node for the lifecycle of a
+ request, the chances of having to open a new connection are much reduced.</p>
     <h3>Info:</h3>
     <ul>
         <li><strong>Author</strong>: thibaultcha</li>
@@ -80,7 +86,7 @@
 <table class="function_list">
 	<tr>
 	<td class="name" nowrap><a href="#new">new ()</a></td>
-	<td class="summary">Create a round robin policy.</td>
+	<td class="summary">Create a request-aware round robin policy.</td>
 	</tr>
 </table>
 
@@ -96,8 +102,8 @@
     <strong>new ()</strong>
     </dt>
     <dd>
-    Create a round robin policy.
- Instanciates a round robin policy for <a href="../modules/resty.cassandra.cluster.html#">resty.cassandra.cluster</a>.
+    Create a request-aware round robin policy.
+ Instanciates a request-aware round robin policy for <a href="../modules/resty.cassandra.cluster.html#">resty.cassandra.cluster</a>.
 
 
 
@@ -105,7 +111,7 @@
     <ol>
 
            <span class="types"><a class="type" href="https://www.lua.org/manual/5.1/manual.html#5.5">table</a></span>
-        <code>policy</code>: A round robin policy.
+        <code>policy</code>: A request-ware round robin policy.
     </ol>
 
 
@@ -113,9 +119,9 @@
     <h3>Usage:</h3>
     <ul>
         <pre class="example"><span class="keyword">local</span> Cluster = <span class="global">require</span> <span class="string">"resty.cassandra.cluster"</span>
-<span class="keyword">local</span> rr = <span class="global">require</span> <span class="string">"resty.cassandra.policies.lb.rr"</span>
+<span class="keyword">local</span> req_rr = <span class="global">require</span> <span class="string">"resty.cassandra.policies.lb.req_rr"</span>
 
-<span class="keyword">local</span> policy = rr.new()
+<span class="keyword">local</span> policy = req_rr.new()
 <span class="keyword">local</span> cluster = <span class="global">assert</span>(Cluster.new {
   lb_policy = policy
 })</pre>

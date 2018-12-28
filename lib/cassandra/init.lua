@@ -2,7 +2,7 @@
 -- Single host module for PUC Lua, LuaJIT and OpenResty.
 -- @module cassandra
 -- @author thibaultcha
--- @release 1.1.0
+-- @release 1.3.3
 
 local socket = require 'cassandra.socket'
 local cql = require 'cassandra.cql'
@@ -74,7 +74,7 @@ local find = string.find
 -- @table cassandra.auth_providers
 
 local _Host = {
-  _VERSION = '1.1.0',
+  _VERSION = '1.3.3',
   cql_errors = cql.errors,
   consistencies = cql.consistencies,
   auth_providers = require 'cassandra.auth'
@@ -318,8 +318,8 @@ end
 -- @treturn boolean `ok`: `true` if success, `nil` if failure.
 -- @treturn string `err`: String describing the error if failure.
 function _Host:change_keyspace(keyspace)
-  local ok, err = self:close()
-  if not ok then return nil, err end
+  local _, err = self:close()
+  if err then return nil, err end
 
   local sock, err = socket.tcp()
   if err then return nil, err end
@@ -643,9 +643,9 @@ end
 -- @field float CQL float.
 --     cassandra.float(1.618033)
 -- @field int CQL int.
---     cassandra.float(10)
+--     cassandra.int(10)
 -- @field text CQL text.
---     cassandra.float("hello world")
+--     cassandra.text("hello world")
 -- @field timeuuid CQL timeuuid.
 -- @field varchar CQL varchar.
 -- @field varint CQL varint.

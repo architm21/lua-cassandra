@@ -102,6 +102,7 @@ local ERRORS            = {
   READ_TIMEOUT          = 0x1200,
   READ_FAILURE          = 0x1300,
   FUNCTION_FAILURE      = 0x1400,
+  WRITE_FAILURE         = 0x1500,
   SYNTAX_ERROR          = 0x2000,
   UNAUTHORIZED          = 0x2100,
   INVALID               = 0x2200,
@@ -122,6 +123,7 @@ local ERROR_TRANSLATIONS         = {
   [ERRORS.READ_TIMEOUT]          = 'Read timeout',
   [ERRORS.READ_FAILURE]          = 'Read failure',
   [ERRORS.FUNCTION_FAILURE]      = 'Function failure',
+  [ERRORS.WRITE_FAILURE]         = 'Write failure',
   [ERRORS.SYNTAX_ERROR]          = 'Syntax error',
   [ERRORS.UNAUTHORIZED]          = 'Unauthorized',
   [ERRORS.INVALID]               = 'Invalid',
@@ -152,7 +154,7 @@ local OP_CODES   = {
 local FRAME_FLAGS  = {
   --COMPRESSION    = 0x01,
   TRACING          = 0x02,
-  --CUSTOM_PAYLOAD = 0x04,
+  CUSTOM_PAYLOAD   = 0x04,
   WARNING          = 0x08,
 }
 
@@ -482,6 +484,19 @@ do
     return {fields = fields}
   end
 
+  local function unmarsh_bytes_map(buffer)
+    local n = buffer:read_short()
+
+    local fields = {}
+    for _ = 1, n do
+      local key = buffer:read_string()
+      local value = buffer:read_bytes()
+      fields[key] = value
+    end
+
+    return fields
+  end
+
   do
     local marshallers = {
       byte            = {marsh_byte, unmarsh_byte},
@@ -498,7 +513,8 @@ do
       string_list     = {marsh_string_list, unmarsh_string_list},
       string_multimap = {marsh_string_multimap, unmarsh_string_multimap},
       udt_type        = {nil, unmarsh_udt_type},
-      tuple_type      = {nil, unmarsh_tuple_type}
+      tuple_type      = {nil, unmarsh_tuple_type},
+      bytes_map       = {nil, unmarsh_bytes_map}
     }
 
     for name, t in pairs(marshallers) do
@@ -1360,14 +1376,18 @@ do
     local op_code = header.op_code
     local body = Buffer.new(header.version, bytes)
 
+    local tracing_id, warnings
+    if band(header.flags, FRAME_FLAGS.TRACING) ~= 0 then
+      tracing_id = body:read_uuid()
+    end
+    if band(header.flags, FRAME_FLAGS.CUSTOM_PAYLOAD) ~= 0 then
+      body:read_bytes_map() -- discard
+    end
+    if band(header.flags, FRAME_FLAGS.WARNING) ~= 0 then
+      warnings = body:read_string_list()
+    end
+
     if op_code == OP_CODES.RESULT then
-      local tracing_id, warnings
-      if band(header.flags, FRAME_FLAGS.TRACING) ~= 0 then
-        tracing_id = body:read_uuid()
-      end
-      if band(header.flags, FRAME_FLAGS.WARNING) ~= 0 then
-        warnings = body:read_string_list()
-      end
       local result_kind = body:read_int()
       local parser = results_parsers[result_kind]
       local res = parser(body)
@@ -1377,7 +1397,15 @@ do
     elseif op_code == OP_CODES.ERROR then
       local code = body:read_int()
       local message = body:read_string()
-      return nil, '['..ERROR_TRANSLATIONS[code]..'] '..message, code
+      local error_translation = ERROR_TRANSLATIONS[code]
+
+      -- If the translation is not found, return a formatted string
+      -- with the error code for convenience.
+      if error_translation == nil then
+        error_translation = fmt('UNSUPPORTED ERROR (code=0x%x)', code)
+      end
+
+      return nil, '['.. error_translation ..'] '..message, code
     elseif op_code == OP_CODES.READY then
       return ready
     elseif op_code == OP_CODES.AUTHENTICATE then

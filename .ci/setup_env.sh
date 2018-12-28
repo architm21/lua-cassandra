@@ -6,7 +6,8 @@ set -e
 pip install --user PyYAML six
 git clone https://github.com/pcmanus/ccm.git
 pushd ccm
-  git checkout 18a50dfde2069e64a3124e2300ad1f0c1e08f908
+  # sha of 'Release 3.0.1'
+  git checkout 599e2026035e334dbc2ce24117ce745641506374
   ./setup.py install --user
 popd
 
@@ -44,7 +45,6 @@ if [ "$OPENRESTY_TESTS" = true ]; then
         --without-http_coolkit_module \
           --without-http_coolkit_module \
           --without-lua_resty_dns \
-          --without-lua_resty_lrucache \
           --without-lua_resty_upstream_healthcheck \
           --without-lua_resty_websocket \
           --without-lua_resty_upload \

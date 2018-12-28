@@ -188,7 +188,7 @@ qq {
             local Cluster = require 'resty.cassandra.cluster'
             local cluster, err = Cluster.new {
                 contact_points = {'255.255.255.254'},
-                connect_timeout = 10
+                timeout_connect = 10
             }
             if not cluster then
                 ngx.log(ngx.ERR, err)
@@ -534,7 +534,7 @@ up: false
                 ngx.log(ngx.ERR, err)
             end
 
-            cluster.shm:set('host:rec:127.0.0.1', 'foobar')
+            cluster.shm:set('host:rec:127.0.0.1', false)
 
             local peers, err = cluster:get_peers()
             if not peers then
@@ -995,8 +995,8 @@ coordinator 3: 127.0.0.1
     }
 --- request
 GET /t
---- response_body
-all hosts tried for query failed. 127.0.0.2: host still considered down. 127.0.0.3: host still considered down. 127.0.0.1: host still considered down
+--- response_body_like chomp
+all hosts tried for query failed\. 127\.0\.0\.\d+: host still considered down\. 127\.0\.0\.\d+: host still considered down\. 127\.0\.0\.\d+: host still considered down
 --- no_error_log
 [error]
 

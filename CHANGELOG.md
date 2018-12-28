@@ -1,12 +1,101 @@
-### [Unreleased][unreleased]
+### [1.3.3]
 
-### [1.1.0]
+> Released on: 2018/11/09
+
+##### Added
+
+- Support for binary CQL frames with custom payload.
+  [#119](https://github.com/thibaultcha/lua-cassandra/pull/119)
+
+##### Fixed
+
+- Favor the `rpc_address` value to connect to the provided contact
+  points.
+  [#122](https://github.com/thibaultcha/lua-cassandra/pull/122)
+
+### [1.3.2]
+
+> Released on: 2018/08/10
+
+##### Fixed
+
+- Environments with DNS load-balancing in effect for `contact_points` provided
+  as hostnames (e.g. Kubernetes with `contact_points = { "cassandra" }`) could
+  result in `no host details for <peer IP>` errors when using multiple
+  instances of the Cluster module. This is now fixed.
+  [#118](https://github.com/thibaultcha/lua-cassandra/pull/118)
+
+### [1.3.1] - 2018/07/02
+
+##### Fixed
+
+- The new request-aware load-balancing policies can now be used in the
+  init_by_lua* context when using the lua-resty-core module (only applies
+  to OpenResty environments).
+  [#117](https://github.com/thibaultcha/lua-cassandra/pull/117)
+
+### [1.3.0] - 2018/06/14
+
+##### Added
+
+- New request-aware load-balancing policy for OpenResty environments.
+- New request-aware + datacenter-aware load-balancing policy for OpenResty
+  environments.
+  Thanks [@kikito](https://github.com/kikito) for the patch!
+  [#114](https://github.com/thibaultcha/lua-cassandra/pull/114)
+
+### [1.2.3] - 2017/07/20
+
+##### Added
+
+- Expose the `check_schema_consensus()` method of the Cluster module for
+  host applications to use.
+
+##### Fixed
+
+- Safely share peers across workers in the Cluster module.
+  [#97](https://github.com/thibaultcha/lua-cassandra/pull/97)
+
+### [1.2.2] - 2017/05/17
+
+##### Added
+
+- New `cafile` option for the Cluster module. This allows supporting SSL
+  connections to Cassandra clusters when lua-cassandra is used in contexts
+  that do not support cosockets, and fallback on LuaSocket.
+  [#95](https://github.com/thibaultcha/lua-cassandra/pull/95)
+
+### [1.2.1] - 2017/04/03
+
+##### Fixed
+
+- Force the Nginx time to be updated when checking for schema consensus
+  timeout.
+  [#90](https://github.com/thibaultcha/lua-cassandra/pull/90)
+
+### [1.2.0] - 2017/03/24
+
+##### Added
+
+- Methods to manually add and remove peers from a Cluster module instance.
+  [#87](https://github.com/thibaultcha/lua-cassandra/pull/87)
+
+### [1.1.1] - 2016/02/28
+
+##### Added
+
+- Expose the underlying `first_coordinator` and `wait_schema_consensus`
+functions from the Cluster module.
+
+### [1.1.0] - 2016/01/12
 
 ##### Changed
 
 - :warning: Peers are now part of different connection pools depending on their
 keyspace. This can fix eventual issues when using several keyspaces with a
-single peer/cluster instance. This is a breaking change:
+single peer/cluster instance.
+[6c0db5e](https://github.com/thibaultcha/lua-cassandra/commit/6c0db5e178daa119c6df2b40ff648349cba50799)
+This is a breaking change:
   ```lua
     -- before:
     local peer = cassandra.new()
@@ -16,13 +105,14 @@ single peer/cluster instance. This is a breaking change:
     -- after:
     local peer = cassandra.new()
     peer:connect()
-    peer:change_keyspace('my_keyspace') -- close the connection and opens a new one
+    peer:change_keyspace('my_keyspace') -- closes the underlying connection and open a new one
   ```
 
 ##### Added
 
 - New `coordinator_options` for `execute()`/`batch()`/`iterate()` allowing for
-more granularity in keyspace settings. Example:
+more granularity in keyspace settings. Accepted options are `keyspace` and
+`no_keyspace`. Example:
   ```lua
     local Cluster = cluster.new {
       keyspace = 'my_keyspace'
@@ -33,6 +123,7 @@ more granularity in keyspace settings. Example:
       --no_keyspace = true -- would disable setting a keyspace for this request
     })
   ```
+[cdc6607](https://github.com/thibaultcha/lua-cassandra/commit/cdc6607d26d23d6d9e1268d3db316aaf90ce51a8)
 - Support for binary protocol v4.
 [#61](https://github.com/thibaultcha/lua-cassandra/pull/61)
   - New `cassandra.null` CQL marshalling type. This type is different than
@@ -41,11 +132,36 @@ more granularity in keyspace settings. Example:
   - Parse `SCHEMA_CHANGE` results for `FUNCTION` and `AGGREGATE`.
   - The Cluster module now parses warnings contained in response frames and
   logs them at the `ngx.WARN` level.
+- Implement a `silent` option for `Cluster.new()` to disable logging in the
+  nginx error logs.
+  [#60](https://github.com/thibaultcha/lua-cassandra/pull/69)
+- Implement a `lock_timeout` option for `Cluster.new()` to specify a max
+  waiting time in seconds for the cluster refreshing and requests preparing
+  mutexes. This option prevents such mutexes to hang for too long.
+  [2bd3d66](https://github.com/thibaultcha/lua-cassandra/commit/2bd3d66eb26530490391ffb0f5dc366cc9fd0874)
+- The `cluster:refresh()` method now returns the list of fetched Cassandra
+  nodes from the cluster as a third return value.
+  [34f5f11](https://github.com/thibaultcha/lua-cassandra/commit/34f5f1168f5a69dddf53c5564b8577250a7fde0a)
 
 ##### Fixed
 
 - Correctly logs the address of peers being set UP or DOWN in the warning logs.
+  [40fd870](https://github.com/thibaultcha/lua-cassandra/commit/40fd8705b55059e55e6687394354937d2dead2c2)
 - Better error messages for SSL handshake/locking failures.
+- Better handling in case the shm containing the cluster info is full. We do
+  not override previous values at the risk of losing cluster nodes info, but
+  error out with the `"no memory"` error instead.
+  [4520a3b](https://github.com/thibaultcha/lua-cassandra/commit/4520a3b034a7b4d9d00975c95ecf834ce263f048)
+- Correctly receives read and connect timeout options.
+  [#71](https://github.com/thibaultcha/lua-cassandra/pull/71)
+- Log the reason behind retrying a request in the `cluster` module.
+  [#71](https://github.com/thibaultcha/lua-cassandra/pull/71)
+- Fallback on `listen_address` when `rpc_address` is "bind all" when refreshing
+  the cluster nodes with the `cluster` module.
+  [#72](https://github.com/thibaultcha/lua-cassandra/pull/72)
+- Propagate the CQL version in use when marshalling CQL collection types such
+  as map, set, tuple or udt. We now properly marshall such nested CQL values.
+  [#73](https://github.com/thibaultcha/lua-cassandra/pull/73)
 
 ### [1.0.0] - 2016/07/27
 
@@ -257,7 +373,15 @@ now be called with `:`.
 
 - `set_keyspace` erroring on names with capital letters.
 
-[unreleased]: https://github.com/thibaultCha/lua-cassandra/compare/1.1.0...HEAD
+[1.3.3]: https://github.com/thibaultCha/lua-cassandra/compare/1.3.2...1.3.3
+[1.3.2]: https://github.com/thibaultCha/lua-cassandra/compare/1.3.1...1.3.2
+[1.3.1]: https://github.com/thibaultCha/lua-cassandra/compare/1.3.0...1.3.1
+[1.3.0]: https://github.com/thibaultCha/lua-cassandra/compare/1.2.3...1.3.0
+[1.2.3]: https://github.com/thibaultCha/lua-cassandra/compare/1.2.2...1.2.3
+[1.2.2]: https://github.com/thibaultCha/lua-cassandra/compare/1.2.1...1.2.2
+[1.2.1]: https://github.com/thibaultCha/lua-cassandra/compare/1.2.0...1.2.1
+[1.2.0]: https://github.com/thibaultCha/lua-cassandra/compare/1.1.1...1.2.0
+[1.1.1]: https://github.com/thibaultCha/lua-cassandra/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/thibaultCha/lua-cassandra/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/thibaultCha/lua-cassandra/compare/0.5.1...1.0.0
 [0.5.1]: https://github.com/thibaultCha/lua-cassandra/compare/0.5.0...0.5.1
